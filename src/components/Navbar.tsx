@@ -78,13 +78,21 @@ export const Navbar: React.FC = () => {
     <Box sx={{ width: 250 }} role="presentation">
       {user ? (
         <>
-          <Box sx={{ p: 2 }}>
-            <Typography variant="subtitle1" noWrap>
-              {user.name}
-            </Typography>
-            <Typography variant="body2" color="text.secondary" noWrap>
-              {user.email}
-            </Typography>
+          <Box sx={{ p: 2, bgcolor: 'background.default' }}>
+            <Box display="flex" alignItems="center" gap={1.5}>
+              <AccountCircle fontSize="large" color="primary" />
+              <Box>
+                <Typography variant="subtitle1" fontWeight="bold" noWrap>
+                  {user.name}
+                </Typography>
+                <Typography variant="body2" color="text.secondary" noWrap>
+                  {user.email}
+                </Typography>
+                <Typography variant="caption" color="primary" sx={{ display: 'block' }}>
+                  {user.role === 'doctor' ? 'Médico' : 'Paciente'}
+                </Typography>
+              </Box>
+            </Box>
           </Box>
           <Divider />
           <List>
@@ -163,11 +171,17 @@ export const Navbar: React.FC = () => {
                   ))}
                   <IconButton
                     size="large"
-                    aria-label="cuenta del usuario"
+                    aria-label={`cuenta de ${user.name}`}
                     aria-controls="menu-appbar"
                     aria-haspopup="true"
                     onClick={handleMenu}
                     color="inherit"
+                    title={`Hola, ${user.name}`}
+                    sx={{
+                      '&:hover': {
+                        backgroundColor: 'rgba(255, 255, 255, 0.1)',
+                      }
+                    }}
                   >
                     <AccountCircle />
                   </IconButton>
@@ -187,7 +201,13 @@ export const Navbar: React.FC = () => {
                     onClose={handleClose}
                   >
                     <MenuItem disabled>
-                      <Typography variant="body2">{user.email}</Typography>
+                      <Box sx={{ display: 'flex', flexDirection: 'column', py: 0.5 }}>
+                        <Typography variant="subtitle2" fontWeight="bold">{user.name}</Typography>
+                        <Typography variant="body2" color="text.secondary">{user.email}</Typography>
+                        <Typography variant="caption" color="primary">
+                          {user.role === 'doctor' ? 'Médico' : 'Paciente'}
+                        </Typography>
+                      </Box>
                     </MenuItem>
                     <Divider />
                     <MenuItem onClick={handleLogout}>Cerrar Sesión</MenuItem>
