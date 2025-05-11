@@ -1,0 +1,472 @@
+import axios, { AxiosInstance, AxiosRequestConfig, AxiosResponse, AxiosError } from 'axios';
+// Importación mediante rutas relativas
+import { logger } from './logger';
+// Importaciones de tipos con rutas relativas
+import { AuthResponse, Appointment, Doctor, Availability } from '../types';
+
+declare module 'axios' {
+  export interface InternalAxiosRequestConfig {
+    metadata?: {
+      startTime: number;
+    };
+  }
+}
+
+class ApiService {
+  private static instance: ApiService;
+  private api: AxiosInstance;
+
+  private constructor() {
+    // Usar la URL de la API configurada en variables de entorno o usar fallback seguro
+    const apiBaseUrl = process.env.REACT_APP_API_URL || 'http://localhost:3000/api';
+    
+    this.api = axios.create({
+      // Usar URL completa en lugar de relativa para evitar problemas de proxy
+      baseURL: apiBaseUrl,
+      timeout: 10000,
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      // Evitar que Axios agregue encabezados innecesarios
+      withCredentials: false,
+      // Limitar tamaño máximo de respuesta para evitar problemas
+      maxContentLength: 5000000, // 5MB
+      maxBodyLength: 5000000 // 5MB
+    });
+
+    this.setupInterceptors();
+  }
+
+  public static getInstance(): ApiService {
+    if (!ApiService.instance) {
+      ApiService.instance = new ApiService();
+    }
+    return ApiService.instance;
+  }
+
+  private setupInterceptors(): void {
+    // Interceptor de solicitud
+    this.api.interceptors.request.use(
+      (config) => {
+        // No añadir token para rutas de autenticación específicas (login/register)
+        const isLoginRoute = config.url?.includes('/login');
+        const isRegisterRoute = config.url?.includes('/register');
+        const isAuthRoute = isLoginRoute || isRegisterRoute;
+        const token = localStorage.getItem('token');
+        
+        logger.info('Estado de autenticación', {
+          tokenExists: !!token,
+          url: config.url
+        });
+        
+        // Agregar el token de autorización para todas las rutas excepto login/register
+        if (token && !isAuthRoute) {
+          config.headers = config.headers || {};
+          config.headers.Authorization = `Bearer ${token}`;
+          
+          // Verificar formato del token de forma simplificada
+          if (!token.includes('.')) {
+            logger.warn('Formato de token inválido');
+          }
+        } else if (!isAuthRoute) {
+          logger.warn('No se encontró token para la solicitud', { 
+            url: config.url 
+          });
+        }
+
+        // Reducir el tamaño del log para evitar problemas
+        logger.debug('Solicitud API saliente', {
+          method: config.method?.toUpperCase(),
+          url: config.url,
+          hasAuth: config.headers?.Authorization ? 'Sí' : 'No'
+        });
+
+        const startTime = Date.now();
+        config.metadata = { startTime };
+        
+        return config;
+      },
+      (error: AxiosError) => {
+        logger.error('Error en la solicitud API', {
+          error: error.message,
+          config: error.config
+        });
+        return Promise.reject(error);
+      }
+    );
+
+    // Interceptor de respuesta
+    this.api.interceptors.response.use(
+      (response: AxiosResponse) => {
+        const duration = Date.now() - (response.config.metadata?.startTime || 0);
+        
+        logger.debug('Respuesta API recibida', {
+          status: response.status,
+          url: response.config.url,
+          duration: `${duration}ms`,
+          data: response.data
+        });
+
+        return response;
+      },
+      (error: AxiosError) => {
+        const duration = Date.now() - (error.config?.metadata?.startTime || 0);
+
+        logger.error('Error en la respuesta API', {
+          status: error.response?.status,
+          url: error.config?.url,
+          duration: `${duration}ms`,
+          error: error.message,
+          response: error.response?.data
+        });
+
+        // Manejar errores específicos
+        if (error.response?.status === 401) {
+          // No redirigir automáticamente, simplemente limpiar el token
+          // y dejar que los componentes manejen la redirección según el contexto
+          logger.warn('Token expirado o no válido, limpiando almacenamiento local');
+          localStorage.removeItem('token');
+          
+          // Agregar información sobre el error de autenticación al objeto de error
+          const enhancedError: any = error;
+          enhancedError.authError = true;
+        }
+
+        return Promise.reject(error);
+      }
+    );
+  }
+
+  public async get<T>(url: string, config?: AxiosRequestConfig): Promise<T> {
+    try {
+      const response = await this.api.get<T>(url, config);
+      return response.data;
+    } catch (error) {
+      this.handleError(error as AxiosError);
+      throw error;
+    }
+  }
+
+  public async post<T>(url: string, data?: any, config?: AxiosRequestConfig): Promise<T> {
+    try {
+      const response = await this.api.post<T>(url, data, config);
+      return response.data;
+    } catch (error) {
+      this.handleError(error as AxiosError);
+      throw error;
+    }
+  }
+
+  public async put<T>(url: string, data?: any, config?: AxiosRequestConfig): Promise<T> {
+    try {
+      const response = await this.api.put<T>(url, data, config);
+      return response.data;
+    } catch (error) {
+      this.handleError(error as AxiosError);
+      throw error;
+    }
+  }
+
+  public async delete<T>(url: string, config?: AxiosRequestConfig): Promise<T> {
+    try {
+      const response = await this.api.delete<T>(url, config);
+      return response.data;
+    } catch (error) {
+      this.handleError(error as AxiosError);
+      throw error;
+    }
+  }
+
+  private handleError(error: AxiosError): void {
+    const errorResponse = {
+      status: error.response?.status,
+      statusText: error.response?.statusText,
+      data: error.response?.data,
+      config: {
+        url: error.config?.url,
+        method: error.config?.method,
+        data: error.config?.data
+      }
+    };
+
+    logger.error('Error en la operación API', errorResponse);
+
+    // Aquí podrías implementar lógica adicional de manejo de errores
+    // como mostrar notificaciones, redirigir a páginas de error, etc.
+  }
+}
+
+export const apiService = ApiService.getInstance();
+
+// Interfaces
+interface LoginCredentials {
+  email: string;
+  password: string;
+}
+
+interface RegisterData {
+  name: string;
+  email: string;
+  password: string;
+  role: 'patient' | 'doctor';
+  speciality?: string;
+  licenseNumber?: string;
+}
+
+// Auth Service - Implementación optimizada unificada
+export const authService = {
+  // Instancia optimizada de axios para autenticación
+  _getAuthAxios() {
+    // Usar la URL de la API configurada en variables de entorno o usar fallback seguro
+    const apiBaseUrl = process.env.REACT_APP_API_URL || 'http://localhost:3000/api';
+    
+    return axios.create({
+      baseURL: apiBaseUrl,
+      timeout: 10000,
+      headers: {
+        'Content-Type': 'application/json',
+        // Eliminamos cabeceras innecesarias para reducir tamaño
+        'Accept-Encoding': 'gzip, deflate'
+      },
+      // Configuraciones para evitar errores 431
+      maxContentLength: 5000, 
+      maxBodyLength: 5000,
+      decompress: true // Habilitar descompresión para reducir tamaño de respuesta
+    });
+  },
+
+  async login(credentials: LoginCredentials): Promise<AuthResponse> {
+    try {
+      // Limpiar almacenamiento local
+      localStorage.clear();
+      
+      // Normalizar y limitar datos
+      const simplifiedCredentials = {
+        email: credentials.email.trim().toLowerCase().substring(0, 50),
+        password: credentials.password
+      };
+      
+      // Usar endpoint único de autenticación optimizado
+      const resp = await this._getAuthAxios().post('/login', simplifiedCredentials);
+      const response = resp.data as AuthResponse;
+      
+      // Verificar respuesta
+      if (!response || !response.token || !response.user) {
+        throw new Error('Respuesta de autenticación inválida');
+      }
+      
+      // Almacenar token (manejo centralizado en AuthContext)
+      logger.info('Login exitoso', { userId: response.user._id });
+      
+      return response;
+    } catch (error: any) {
+      // Log detallado pero seguro del error
+      logger.error('Error de autenticación', { 
+        status: error.response?.status,
+        message: error.message
+      });
+      throw error;
+    }
+  },
+
+  async register(data: RegisterData): Promise<AuthResponse> {
+    try {
+      // Limpiar cualquier dato de sesión anterior
+      localStorage.clear();
+      
+      // Asegurarse de que el correo está normalizado y limitado
+      const optimizedData = {
+        ...data,
+        email: data.email.trim().toLowerCase().substring(0, 50),
+        name: data.name.trim().substring(0, 100) // Limitar nombre también
+      };
+      
+      // Usar endpoint optimizado para registro
+      const resp = await this._getAuthAxios().post('/register', optimizedData);
+      const response = resp.data as AuthResponse;
+      
+      if (!response || !response.token || !response.user) {
+        throw new Error('Respuesta de registro inválida');
+      }
+      
+      // No almacenar token aquí, lo manejará el AuthContext
+      logger.info('Registro procesado exitosamente', { userId: response.user._id });
+      
+      return response;
+    } catch (error: any) {
+      logger.error('Error de registro:', { 
+        status: error.response?.status,
+        message: error.message
+      });
+      throw error;
+    }
+  },
+
+  logout() {
+    localStorage.removeItem('token');
+    logger.info('User logged out');
+  }
+};
+
+// User Service
+export const userService = {
+  async getCurrentUser(): Promise<AuthResponse> {
+    try {
+      const response = await apiService.get<AuthResponse>('/users/me');
+      if (!response || !response.user) {
+        throw new Error('Respuesta de usuario inválida');
+      }
+      return response;
+    } catch (error) {
+      logger.error('Get current user error:', error);
+      throw error;
+    }
+  },
+
+  async updateProfile(data: any) {
+    try {
+      const response = await apiService.put<AuthResponse>('/users/profile', data);
+      return response;
+    } catch (error) {
+      logger.error('Update profile error:', error);
+      throw error;
+    }
+  }
+};
+
+// Doctor Service
+export const doctorService = {
+  async getDoctor(id: string) {
+    try {
+      logger.debug('Obteniendo información del doctor', { doctorId: id });
+      const response = await apiService.get<Doctor>(`/doctors/${id}`);
+      return response;
+    } catch (error) {
+      logger.error('Get doctor error:', error);
+      throw error;
+    }
+  },
+
+  async getDoctors(filters?: any) {
+    try {
+      const response = await apiService.get<Doctor[]>('/doctors', { params: filters });
+      return response;
+    } catch (error) {
+      logger.error('Get doctors error:', error);
+      throw error;
+    }
+  },
+
+  async updateAvailability(doctorId: string, availability: Availability[]) {
+    try {
+      logger.debug('Actualizando disponibilidad del doctor', { doctorId, availability });
+      const response = await apiService.put<Doctor>(`/doctors/${doctorId}/availability`, { availability });
+      logger.info('Disponibilidad actualizada exitosamente', { doctorId });
+      return response;
+    } catch (error: any) {
+      // Mejorar el manejo de errores para mostrar mensajes más específicos
+      const errorMessage = error.response?.data?.message || error.message;
+      logger.error('Error al actualizar disponibilidad', { error: errorMessage, doctorId });
+      throw new Error(errorMessage);
+    }
+  },
+
+  async getDoctorAvailability(doctorId: string) {
+    try {
+      logger.debug('Obteniendo disponibilidad del doctor', { doctorId });
+      const response = await apiService.get<Doctor>(`/doctors/${doctorId}`);
+      return response.availability || [];
+    } catch (error: any) {
+      const errorMessage = error.response?.data?.message || error.message;
+      logger.error('Error al obtener disponibilidad', { error: errorMessage, doctorId });
+      throw new Error(errorMessage);
+    }
+  }
+};
+
+// Appointment Service
+export const appointmentService = {
+  async createAppointment(data: any) {
+    try {
+      const response = await apiService.post<Appointment>('/appointments', data);
+      return response;
+    } catch (error) {
+      logger.error('Create appointment error:', error);
+      throw error;
+    }
+  },
+
+  async getAppointments(params?: any) {
+    try {
+      // Agregar log para verificar que el token está presente
+      const token = localStorage.getItem('token');
+      const userRole = localStorage.getItem('userRole');
+      const userId = localStorage.getItem('userId');
+      
+      // Verificar si hay token antes de hacer la petición
+      if (!token) {
+        logger.warn('Intentando obtener citas sin token de autenticación');
+        throw new Error('No hay token de autenticación. Por favor inicie sesión nuevamente.');
+      }
+      
+      logger.info('Obteniendo citas con filtros', { 
+        userRole, 
+        hasToken: true,
+        tokenLength: token.length,
+        userId,
+        params 
+      });
+      
+      const response = await apiService.get<Appointment[]>('/appointments', { params });
+      
+      // Verificar que la respuesta es un array válido
+      if (!Array.isArray(response)) {
+        logger.warn('Respuesta de citas no es un array', { response });
+        return [];
+      }
+      
+      logger.info('Citas obtenidas correctamente', { 
+        count: response.length,
+        userRole
+      });
+      
+      return response;
+    } catch (error) {
+      logger.error('Get appointments error:', error);
+      // Retornar un array vacío para evitar errores en el componente
+      return [];
+    }
+  },
+
+  async getAppointment(id: string) {
+    try {
+      const response = await apiService.get<Appointment>(`/appointments/${id}`);
+      return response;
+    } catch (error) {
+      logger.error('Get appointment error:', error);
+      throw error;
+    }
+  },
+
+  async updateAppointment(id: string, data: any) {
+    try {
+      const response = await apiService.put<Appointment>(`/appointments/${id}`, data);
+      return response;
+    } catch (error) {
+      logger.error('Update appointment error:', error);
+      throw error;
+    }
+  },
+
+  async cancelAppointment(id: string) {
+    try {
+      const response = await apiService.post<Appointment>(`/appointments/${id}/cancel`);
+      return response;
+    } catch (error) {
+      logger.error('Cancel appointment error:', error);
+      throw error;
+    }
+  }
+};
+
+export default apiService;

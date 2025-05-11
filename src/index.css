@@ -5,9 +5,63 @@ body {
     sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  background-color: #f5f5f5;
 }
 
 code {
   font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
     monospace;
+}
+
+.MuiContainer-root {
+  padding-top: 24px;
+  padding-bottom: 24px;
+}
+
+.MuiPaper-root {
+  background-color: #ffffff;
+}
+
+/* Estilos para los campos de formulario */
+.MuiTextField-root {
+  margin-bottom: 16px;
+}
+
+/* Estilos para los botones */
+.MuiButton-contained {
+  text-transform: none;
+  font-weight: 500;
+}
+
+/* Estilos para las tablas */
+.MuiTableContainer-root {
+  margin-top: 16px;
+}
+
+.MuiTableHead-root .MuiTableCell-root {
+  font-weight: 600;
+  background-color: #f5f5f5;
+  color: rgba(0, 0, 0, 0.87);
+}
+
+.MuiTableBody-root .MuiTableCell-root {
+  color: rgba(0, 0, 0, 0.87);
+}
+
+/* Estilos para los chips de estado */
+.MuiChip-root {
+  font-weight: 500;
+}
+
+/* Estilos para los diálogos */
+.MuiDialog-paper {
+  min-width: 400px;
+}
+
+@media (max-width: 600px) {
+  .MuiDialog-paper {
+    margin: 16px;
+    width: calc(100% - 32px);
+    min-width: unset;
+  }
 }
