@@ -2,7 +2,7 @@ import axios, { AxiosInstance, AxiosRequestConfig, AxiosResponse, AxiosError } f
 // Importación mediante rutas relativas
 import { logger } from './logger';
 // Importaciones de tipos con rutas relativas
-import { AuthResponse, Appointment, Doctor, Availability } from '../types';
+import { AuthResponse, Appointment, Doctor, Availability, User } from '../types';
 
 declare module 'axios' {
   export interface InternalAxiosRequestConfig {
@@ -18,20 +18,42 @@ class ApiService {
 
   private constructor() {
     // Usar la URL de la API configurada en variables de entorno o usar fallback seguro
-    const apiBaseUrl = process.env.REACT_APP_API_URL || 'http://localhost:3000/api';
+    let apiBaseUrl = process.env.REACT_APP_API_URL || 'http://localhost:3000/api';
+    
+    // Asegurarse de que la URL base termine con /
+    if (!apiBaseUrl.endsWith('/')) {
+      apiBaseUrl = `${apiBaseUrl}/`;
+    }
+    
+    logger.info('Inicializando ApiService con baseURL', { baseURL: apiBaseUrl });
     
     this.api = axios.create({
       // Usar URL completa en lugar de relativa para evitar problemas de proxy
       baseURL: apiBaseUrl,
-      timeout: 10000,
+      timeout: 15000, // Aumentar el timeout a 15 segundos
       headers: {
-        'Content-Type': 'application/json'
+        'Content-Type': 'application/json',
+        'Accept': 'application/json' // Especificar que esperamos JSON de vuelta
       },
       // Evitar que Axios agregue encabezados innecesarios
       withCredentials: false,
       // Limitar tamaño máximo de respuesta para evitar problemas
       maxContentLength: 5000000, // 5MB
-      maxBodyLength: 5000000 // 5MB
+      maxBodyLength: 5000000, // 5MB
+      // Configuraciones adicionales para mayor estabilidad
+      validateStatus: status => status < 500, // Solo rechazar promesas en errores 500+
+      // Configurar transformadores de request para eliminar encabezados problemáticos
+      transformRequest: [
+        (data, headers) => {
+          // Eliminar encabezados que pueden causar problemas (como Accept-Encoding)
+          // ya que estos son manejados automáticamente por el navegador
+          if (headers) {
+            delete headers['Accept-Encoding'];
+          }
+          return data;
+        }, 
+        ...axios.defaults.transformRequest as any
+      ]
     });
 
     this.setupInterceptors();
@@ -59,9 +81,15 @@ class ApiService {
           url: config.url
         });
         
+        // Asegurarse de que config.headers exista
+        config.headers = config.headers || {};
+        
+        // Eliminar encabezados que pueden causar problemas CORS
+        delete config.headers['Accept-Encoding'];
+        delete config.headers['X-XSRF-TOKEN'];
+        
         // Agregar el token de autorización para todas las rutas excepto login/register
         if (token && !isAuthRoute) {
-          config.headers = config.headers || {};
           config.headers.Authorization = `Bearer ${token}`;
           
           // Verificar formato del token de forma simplificada
@@ -111,10 +139,14 @@ class ApiService {
       },
       (error: AxiosError) => {
         const duration = Date.now() - (error.config?.metadata?.startTime || 0);
+        const baseURL = error.config?.baseURL || '';
+        const url = error.config?.url || '';
+        const fullUrl = url.startsWith('http') ? url : `${baseURL}${url}`;
 
         logger.error('Error en la respuesta API', {
           status: error.response?.status,
-          url: error.config?.url,
+          url: fullUrl, // Registrar la URL completa para depuración
+          method: error.config?.method?.toUpperCase(),
           duration: `${duration}ms`,
           error: error.message,
           response: error.response?.data
@@ -130,6 +162,25 @@ class ApiService {
           // Agregar información sobre el error de autenticación al objeto de error
           const enhancedError: any = error;
           enhancedError.authError = true;
+        }
+        
+        // Manejar el caso específico de error 404 en /users/current
+        if (error.response?.status === 404 && error.config?.url?.includes('/users/current')) {
+          logger.error(`Error 404: Ruta ${fullUrl} no encontrada`);
+          
+          // Registrar más detalles para la depuración
+          logger.debug('Detalles de la configuración de la solicitud fallida', {
+            headers: error.config?.headers,
+            baseURL: error.config?.baseURL,
+            fullPath: fullUrl
+          });
+          
+          // Si estamos en desarrollo, ofrecer sugerencia específica para este problema
+          if (process.env.NODE_ENV === 'development') {
+            const enhancedError: any = error;
+            enhancedError.message = 'Error en la configuración del servidor: Ruta de usuario actual no encontrada';
+            enhancedError.suggestion = 'Verifica que la ruta /users/current esté definida antes de /users/:id en el archivo user.routes.js';
+          }
         }
 
         return Promise.reject(error);
@@ -224,9 +275,8 @@ export const authService = {
       baseURL: apiBaseUrl,
       timeout: 10000,
       headers: {
-        'Content-Type': 'application/json',
-        // Eliminamos cabeceras innecesarias para reducir tamaño
-        'Accept-Encoding': 'gzip, deflate'
+        'Content-Type': 'application/json'
+        // No incluir cabeceras restringidas como Accept-Encoding
       },
       // Configuraciones para evitar errores 431
       maxContentLength: 5000, 
@@ -310,26 +360,97 @@ export const authService = {
 
 // User Service
 export const userService = {
-  async getCurrentUser(): Promise<AuthResponse> {
+  async getUsers(params?: any) {
     try {
-      const response = await apiService.get<AuthResponse>('/users/me');
-      if (!response || !response.user) {
-        throw new Error('Respuesta de usuario inválida');
-      }
+      const response = await apiService.get<User[]>('/users', { params });
       return response;
     } catch (error) {
-      logger.error('Get current user error:', error);
+      logger.error('Error al obtener usuarios:', error);
       throw error;
     }
   },
 
-  async updateProfile(data: any) {
+  async getUserById(id: string) {
     try {
-      const response = await apiService.put<AuthResponse>('/users/profile', data);
+      const response = await apiService.get<User>(`/users/${id}`);
       return response;
     } catch (error) {
-      logger.error('Update profile error:', error);
+      logger.error('Error al obtener usuario por ID:', error);
       throw error;
+    }
+  },
+
+  async getCurrentUser() {
+    try {
+      // Verificamos si existe un token antes de hacer la solicitud
+      const token = localStorage.getItem('token');
+      if (!token) {
+        logger.warn('Intentando obtener usuario actual sin token');
+        throw new Error('No hay token de autenticación');
+      }
+
+      // Añadimos un registro adicional para depuración
+      logger.info('Solicitando usuario actual', {
+        tokenExists: true,
+        tokenLength: token.length
+      });
+      
+      // Usar la ruta exacta sin parámetros adicionales que podrían causar problemas
+      const response = await apiService.get<AuthResponse>('/users/current');
+      
+      // Verificar que la respuesta sea válida
+      if (!response || !response.user) {
+        logger.error('Respuesta inválida al obtener usuario actual', { response });
+        throw new Error('Respuesta inválida al obtener usuario actual');
+      }
+      
+      return response;
+    } catch (error: any) {
+      if (error.response?.status === 404) {
+        logger.error('Error 404: Ruta /users/current no encontrada');
+        
+        // Intentar una ruta alternativa como fallback
+        try {
+          const token = localStorage.getItem('token');
+          if (!token) throw new Error('Token no disponible para ruta alternativa');
+          
+          logger.info('Intentando ruta alternativa para obtener usuario');
+          
+          // Extraer el ID de usuario del token para crear una URL alternativa
+          const tokenParts = token.split('.');
+          const payload = JSON.parse(atob(tokenParts[1]));
+          const userId = payload.sub || payload.id;
+          
+          if (!userId) {
+            throw new Error('No se pudo extraer ID del usuario del token');
+          }
+          
+          // Intentar obtener el usuario por ID directamente
+          const fallbackResponse = await apiService.get<User>(`/users/${userId}`);
+          
+          if (!fallbackResponse) {
+            throw new Error('No se pudo obtener el usuario mediante ID');
+          }
+          
+          // Crear un objeto de respuesta compatible con AuthResponse
+          const authResponse: AuthResponse = {
+            user: fallbackResponse,
+            token,
+            refreshToken: ''
+          };
+          
+          logger.info('Usuario recuperado mediante ruta alternativa', { userId });
+          return authResponse;
+        } catch (fallbackError) {
+          logger.error('Falló también la ruta alternativa', { 
+            error: fallbackError instanceof Error ? fallbackError.message : 'Error desconocido' 
+          });
+          throw new Error('Error en la configuración del servidor: No se pudo acceder al usuario actual');
+        }
+      } else {
+        logger.error('Error al obtener usuario actual:', error);
+        throw error;
+      }
     }
   }
 };
@@ -460,13 +581,118 @@ export const appointmentService = {
 
   async cancelAppointment(id: string) {
     try {
-      const response = await apiService.post<Appointment>(`/appointments/${id}/cancel`);
+      const response = await apiService.put<Appointment>(`/appointments/${id}/cancel`);
       return response;
     } catch (error) {
       logger.error('Cancel appointment error:', error);
       throw error;
     }
-  }
+  },
+
+  async getArchivedAppointments(params?: any) {
+    try {
+      // Verificar que haya un token válido antes de intentar la petición
+      const token = localStorage.getItem('token');
+      if (!token) {
+        logger.warn('Intentando obtener citas archivadas sin token');
+        throw new Error('Sesión no válida. Por favor inicie sesión nuevamente.');
+      }
+      
+      logger.info('Obteniendo citas archivadas con filtros', { params });
+      
+      const response = await apiService.get<Appointment[]>('/appointments/archived', { 
+        params,
+        timeout: 10000, // Aumentar timeout para esta solicitud específica
+        headers: {
+          'Cache-Control': 'no-cache' // Evitar problemas de caché
+        }
+      });
+      
+      // Verificar que la respuesta sea un array
+      if (!Array.isArray(response)) {
+        logger.warn('Respuesta de citas archivadas no es un array', { 
+          responseType: typeof response,
+          response 
+        });
+        return [];
+      }
+      
+      // Verificar y normalizar cada cita para prevenir errores
+      const normalizedAppointments = response.map(appointment => {
+        try {
+          // Asegurar que cada cita tenga una estructura básica
+          return {
+            ...appointment,
+            _id: appointment._id || 'unknown',
+            date: appointment.date || new Date().toISOString(),
+            time: appointment.time || '00:00',
+            reason: appointment.reason || 'Sin motivo',
+            status: appointment.status || 'archived',
+            // Normalizar los objetos doctor y patient
+            doctor: typeof appointment.doctor === 'object' && appointment.doctor 
+              ? appointment.doctor 
+              : { _id: String(appointment.doctor || 'unknown'), name: 'Doctor' },
+            patient: typeof appointment.patient === 'object' && appointment.patient 
+              ? appointment.patient 
+              : { _id: String(appointment.patient || 'unknown'), name: 'Paciente' }
+          };
+        } catch (e) {
+          logger.error('Error al normalizar cita', { appointmentId: appointment?._id, error: e });
+          // Devolver un objeto seguro con valores por defecto
+          return {
+            _id: 'error',
+            date: new Date().toISOString(),
+            time: '00:00',
+            reason: 'Error al cargar datos',
+            status: 'archived',
+            doctor: { _id: 'unknown', name: 'Doctor' },
+            patient: { _id: 'unknown', name: 'Paciente' },
+            isArchived: true,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString()
+          } as Appointment;
+        }
+      });
+      
+      logger.info('Citas archivadas obtenidas y normalizadas correctamente', { 
+        count: normalizedAppointments.length 
+      });
+      
+      return normalizedAppointments;
+    } catch (error: any) {
+      // Mejorar el manejo del error
+      if (error?.response?.status === 401) {
+        logger.error('Error de autenticación al obtener citas archivadas', { 
+          status: error.response?.status 
+        });
+        // Devolver un array vacío pero no lanzar error para permitir que la UI maneje esto
+        return [];
+      }
+      
+      logger.error('Error al obtener citas archivadas:', { 
+        status: error?.response?.status,
+        message: error?.message || 'Error desconocido',
+        stack: error?.stack
+      });
+      
+      // Por defecto, devolvemos un array vacío para evitar errores en la UI
+      return [];
+    }
+  },
+
+  async archiveAppointment(id: string) {
+    try {
+      const response = await apiService.put<Appointment>(`/appointments/${id}/archive`, {});
+      logger.info('Cita archivada exitosamente', { id });
+      return response;
+    } catch (error: any) {
+      logger.error('Error al archivar cita:', { 
+        message: error?.message || 'Error desconocido',
+        status: error?.response?.status
+      });
+      throw error;
+    }
+  },
 };
 
 export default apiService;

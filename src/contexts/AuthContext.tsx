@@ -11,6 +11,7 @@ interface AuthContextType {
   register: (data: RegisterData) => Promise<void>;
   logout: () => void;
   clearError: () => void;
+  checkAuth: () => Promise<boolean>; // Añadimos la función de verificación
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -20,84 +21,178 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    const checkAuth = async () => {
+  // Implementar la función checkAuth a nivel de componente para poder exportarla
+  const checkAuth = async (): Promise<boolean> => {
+    try {
+      // Verificar si hay un token y si es válido
+      const token = localStorage.getItem('token');
+      
+      // Si no hay token, simplemente terminamos
+      if (!token) {
+        logger.debug('No se encontró token en localStorage');
+        setLoading(false);
+        return false;
+      }
+      
+      // Si el token es excesivamente grande o mal formateado, podría ser corrupto
+      if (token.length > 2000 || !token.includes('.')) {
+        logger.warn('Token demasiado grande o mal formateado, posiblemente corrupto');
+        localStorage.removeItem('token');
+        setError('Sesión inválida. Por favor, inicie sesión nuevamente.');
+        setLoading(false);
+        return false;
+      }
+      
+      // Intentar decodificar el token para verificar su formato y fecha de expiración
       try {
-        // Verificar si hay un token y si es válido
-        const token = localStorage.getItem('token');
+        const tokenParts = token.split('.');
+        const payload = JSON.parse(atob(tokenParts[1]));
+        const expiration = payload.exp * 1000; // Convertir a milisegundos
         
-        // Si no hay token, simplemente terminamos
-        if (!token) {
-          logger.debug('No se encontró token en localStorage');
-          setLoading(false);
-          return;
-        }
-        
-        // Si el token es excesivamente grande o mal formateado, podría ser corrupto
-        if (token.length > 2000 || !token.includes('.')) {
-          logger.warn('Token demasiado grande o mal formateado, posiblemente corrupto');
+        if (Date.now() >= expiration) {
+          logger.warn('Token expirado', { exp: new Date(expiration).toISOString() });
           localStorage.removeItem('token');
-          setError('Sesión inválida. Por favor, inicie sesión nuevamente.');
+          setError('Su sesión ha expirado. Por favor, inicie sesión nuevamente.');
           setLoading(false);
-          return;
+          return false;
         }
         
-        // Intentar decodificar el token para verificar si está expirado
-        try {
-          const tokenParts = token.split('.');
-          const payload = JSON.parse(atob(tokenParts[1]));
-          const expiration = payload.exp * 1000; // Convertir a milisegundos
-          
-          if (Date.now() >= expiration) {
-            logger.warn('Token expirado', { exp: new Date(expiration).toISOString() });
-            localStorage.removeItem('token');
-            setError('Su sesión ha expirado. Por favor, inicie sesión nuevamente.');
+        logger.info('Token válido hasta', { exp: new Date(expiration).toISOString() });
+        
+        // Almacenar el ID del usuario extraído del token para uso en rutas alternativas
+        const userId = payload.sub || payload.id;
+        if (userId) {
+          localStorage.setItem('userId', userId.toString());
+        }
+      } catch (tokenError) {
+        logger.error('Error al decodificar token', { 
+          error: tokenError instanceof Error ? tokenError.message : 'Error desconocido'
+        });
+        // Continuar de todos modos, el backend validará
+      }
+      
+      try {
+        logger.debug('Verificando autenticación con token existente');
+        
+        // Configurar un timeout para la verificación
+        const verifyPromise = userService.getCurrentUser();
+        const timeoutPromise = new Promise<AuthResponse>((_, reject) => {
+          setTimeout(() => reject(new Error('Tiempo de espera agotado')), 8000); // Aumentado a 8 segundos
+        });
+        
+        // Ejecutar verificación con timeout y manejar reintentos
+        let retryCount = 0;
+        const maxRetries = 2;
+        let lastError: Error | null = null;
+        
+        while (retryCount <= maxRetries) {
+          try {
+            // Ejecutar verificación con timeout
+            const response = await Promise.race([verifyPromise, timeoutPromise]);
+            
+            if (!response || !response.user) {
+              throw new Error('Respuesta de verificación inválida');
+            }
+            
+            // Almacenar el token actualizado si está presente
+            if (response.token) {
+              localStorage.setItem('token', response.token);
+              logger.debug('Token actualizado en localStorage');
+            }
+            
+            // Almacenar el rol del usuario para futuras referencias
+            if (response.user?.role) {
+              localStorage.setItem('userRole', response.user.role);
+            }
+            
+            setUser(response.user);
+            logger.info('Sesión restaurada exitosamente', { 
+              userId: response.user._id,
+              role: response.user.role 
+            });
+            
             setLoading(false);
-            return;
+            return true;
+          } catch (error: any) {
+            lastError = error;
+            
+            // Si es un error 404 específico en la ruta users/current, intentar ruta alternativa
+            if (error.response?.status === 404 && error.config?.url?.includes('/users/current')) {
+              logger.warn('Ruta /users/current no disponible, intentando ruta alternativa');
+              
+              try {
+                // Intentar obtener usuario por ID directamente del token
+                const userId = localStorage.getItem('userId');
+                if (!userId) {
+                  throw new Error('ID de usuario no disponible en localStorage');
+                }
+                
+                const alternativeResponse = await userService.getUserById(userId);
+                if (!alternativeResponse) {
+                  throw new Error('No se encontró el usuario por ID');
+                }
+                
+                // Crear un AuthResponse ficticio con el usuario obtenido
+                const authResponse: AuthResponse = {
+                  user: alternativeResponse,
+                  token,
+                  refreshToken: ''
+                };
+                
+                setUser(alternativeResponse);
+                logger.info('Sesión restaurada mediante ruta alternativa', { 
+                  userId: alternativeResponse._id 
+                });
+                
+                setLoading(false);
+                return true;
+              } catch (altError) {
+                logger.error('Error en ruta alternativa', {
+                  error: altError instanceof Error ? altError.message : 'Error desconocido'
+                });
+              }
+            }
+            
+            // Para errores de red o timeout, intentar nuevamente
+            if (retryCount < maxRetries && !error.response) {
+              const delay = Math.min(1000 * 2 ** retryCount, 5000);
+              logger.debug(`Reintentando checkAuth en ${delay}ms (intento ${retryCount + 1}/${maxRetries})`);
+              await new Promise(resolve => setTimeout(resolve, delay));
+              retryCount++;
+            } else {
+              break;
+            }
           }
-          
-          logger.info('Token válido hasta', { exp: new Date(expiration).toISOString() });
-        } catch (tokenError) {
-          logger.error('Error al decodificar token', { error: tokenError });
-          // Continuar de todos modos, el backend validará
         }
         
-        try {
-          logger.debug('Verificando autenticación con token existente');
-          
-          // Configurar un timeout para la verificación
-          const verifyPromise = userService.getCurrentUser();
-          const timeoutPromise = new Promise<AuthResponse>((_, reject) => {
-            setTimeout(() => reject(new Error('Tiempo de espera agotado')), 5000);
+        // Si llegamos aquí, todos los intentos fallaron
+        if (lastError) {
+          logger.error('Error al restaurar sesión después de reintentos', { 
+            error: lastError instanceof Error ? lastError.message : 'Error desconocido',
+            retries: retryCount
           });
-          
-          // Ejecutar verificación con timeout
-          const response = await Promise.race([verifyPromise, timeoutPromise]);
-          
-          if (!response || !response.user) {
-            throw new Error('Respuesta de verificación inválida');
-          }
-          
-          setUser(response.user);
-          logger.info('Sesión restaurada exitosamente', { userId: response.user._id });
-        } catch (error) {
-          logger.error('Error al restaurar sesión', { 
-            error: error instanceof Error ? error.message : 'Error desconocido'
-          });
-          localStorage.removeItem('token');
-          setError('La sesión ha expirado. Por favor, inicie sesión nuevamente.');
         }
+        
+        setLoading(false);
+        return false;
       } catch (e) {
         const errorMessage = e instanceof Error ? e.message : 'Error desconocido';
         logger.error('Error en checkAuth', { error: errorMessage });
-        // En caso de error, limpiar todo para empezar de nuevo
-        localStorage.removeItem('token');
         setUser(null);
-      } finally {
         setLoading(false);
+        return false;
       }
-    };
+    } catch (e) {
+      const errorMessage = e instanceof Error ? e.message : 'Error desconocido';
+      logger.error('Error general en checkAuth', { error: errorMessage });
+      setUser(null);
+      setLoading(false);
+      return false;
+    }
+  };
 
+  useEffect(() => {
+    // Al iniciar el componente, verificamos la autenticación
     checkAuth();
   }, []);
 
@@ -251,6 +346,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         register,
         logout,
         clearError,
+        checkAuth, // Exportar la función checkAuth en el contexto
       }}
     >
       {children}

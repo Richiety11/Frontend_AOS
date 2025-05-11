@@ -22,9 +22,10 @@ import {
   FormHelperText,
   Box,
   CircularProgress,
+  Alert,
 } from '@mui/material';
 import CustomAlert from '../common/CustomAlert';
-import { Delete, Edit, Add } from '@mui/icons-material';
+import { Delete, Edit, Add, Archive } from '@mui/icons-material';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import { TimePicker } from '@mui/x-date-pickers/TimePicker';
 import { useQuery, useMutation, useQueryClient } from 'react-query';
@@ -32,10 +33,13 @@ import dayjs, { Dayjs } from 'dayjs';
 import { appointmentService, doctorService } from '../../services/api';
 import { useAuth } from '../../contexts/AuthContext';
 import { Appointment, Doctor } from '../../types';
+import PatientSelect from './PatientSelect';
 import ContinueDialog from '../common/ContinueDialog';
+import { logger } from '../../services/logger';
 
 export const AppointmentList: React.FC = () => {
-  const { user } = useAuth();
+  // Extraemos checkAuth en el nivel superior del componente
+  const { user, checkAuth } = useAuth();
   const queryClient = useQueryClient();
   const [openDialog, setOpenDialog] = useState(false);
   const [confirmCancelDialog, setConfirmCancelDialog] = useState(false);
@@ -45,6 +49,7 @@ export const AppointmentList: React.FC = () => {
   const [formData, setFormData] = useState({
     doctorId: '',
     reason: '',
+    patientId: '',
   });
   const [editingAppointment, setEditingAppointment] = useState<Appointment | null>(null);
   const [error, setError] = useState<{
@@ -52,15 +57,54 @@ export const AppointmentList: React.FC = () => {
     date?: string;
     time?: string;
     reason?: string;
+    patientId?: string;
   }>({});
   const [selectedDoctor, setSelectedDoctor] = useState<Doctor | null>(null);
   const [availableTimes, setAvailableTimes] = useState<string[]>([]);
   const [confirmActionDialog, setConfirmActionDialog] = useState(false);
   const [showContinueDialog, setShowContinueDialog] = useState(false);
   const [currentAction, setCurrentAction] = useState<() => void>(() => {});
+  
+  // Función para manejar la reconexión de usuarios cuando hay error 401 o 404
+  // Esta función es definida fuera de cualquier callback para evitar problemas con los hooks
+  const handleReconnect = async (message: string, onSuccess?: () => void) => {
+    setError({ general: message });
+    try {
+      logger.info('Intentando reconectar sesión', { message });
+      // Usamos checkAuth extraído en el nivel superior del componente
+      const success = await checkAuth();
+      if (success) {
+        setError({});
+        if (onSuccess) {
+          setTimeout(onSuccess, 1000);
+        }
+        logger.info('Reconexión exitosa');
+        return true;
+      } else {
+        setError({ 
+          general: 'Su sesión ha expirado. Por favor, inicie sesión nuevamente.' 
+        });
+        
+        // Almacenar la ubicación actual para redirigir después del login
+        localStorage.setItem('redirectAfterLogin', window.location.pathname);
+        
+        // Redireccionar solo después de dar tiempo para leer el mensaje
+        setTimeout(() => {
+          window.location.href = '/login';
+        }, 3000);
+        logger.warn('Reconexión fallida, redirigiendo a login');
+        return false;
+      }
+    } catch (e) {
+      const errorMsg = e instanceof Error ? e.message : 'Error desconocido';
+      logger.error('Error en handleReconnect', { error: errorMsg });
+      setError({ general: 'Error al intentar reconectar: ' + errorMsg });
+      return false;
+    }
+  };
 
   // Obtener citas filtradas según el rol del usuario
-  const { data: appointments, isLoading: loadingAppointments } = useQuery<Appointment[]>(
+  const { data: appointments, isLoading: loadingAppointments, refetch } = useQuery<Appointment[]>(
     ['appointments', user?._id, user?.role],
     async () => {
       // Verificación de seguridad para asegurarnos de que user existe
@@ -96,10 +140,38 @@ export const AppointmentList: React.FC = () => {
     {
       // No ejecutar la consulta hasta que tengamos información del usuario
       enabled: Boolean(user && user._id),
+      retry: 2, // Aumentar a 2 reintentos en caso de error temporal
+      retryDelay: (attemptIndex) => Math.min(1000 * 2 ** attemptIndex, 10000), // Backoff exponencial
       // Mostrar mensaje de error si la consulta falla
-      onError: (error) => {
-        console.error('Error al obtener citas:', error);
-        setError({ general: 'Error al cargar las citas. Por favor, intente de nuevo.' });
+      onError: (err: any) => {
+        console.error('Error al obtener citas:', err);
+        
+        // Mensajes más descriptivos según el tipo de error
+        if (err.response?.status === 404) {
+          // Discriminar entre errores 404 específicos
+          const isUserCurrentError = err.config?.url?.includes('/users/current');
+          if (isUserCurrentError) {
+            // Usar la función de reconexión que creamos
+            setTimeout(() => {
+              handleReconnect('Error de autenticación: Verificando credenciales...', () => refetch());
+            }, 1000);
+          } else {
+            setError({ 
+              general: 'No se pudieron cargar las citas. La función puede estar temporalmente no disponible.'
+            });
+          }
+        } else if (err.response?.status === 401) {
+          // Usar la función de reconexión que creamos
+          handleReconnect('Su sesión necesita revalidación. Intentando reconectar automáticamente...', () => refetch());
+        } else if (err.message === 'Network Error') {
+          setError({ 
+            general: 'Error de conexión. Verifique su conexión a Internet e intente nuevamente.' 
+          });
+        } else {
+          setError({ 
+            general: err.message || 'Error al cargar las citas. Por favor, intente de nuevo.'
+          });
+        }
       }
     }
   );
@@ -187,7 +259,7 @@ export const AppointmentList: React.FC = () => {
         setError({});
       },
       onError: (err: any) => {
-        console.error('Error completo:', err); // Debug
+        logger.error('Error al crear cita:', err);
         const errorResponse = err.response?.data || err;
         const errorMessage = errorResponse?.details || errorResponse?.message || err.message;
         
@@ -198,13 +270,22 @@ export const AppointmentList: React.FC = () => {
           const newErrors: Record<string, string> = {};
           Object.entries(errorMessage).forEach(([key, value]) => {
             if (key === 'doctorId') newErrors.general = value as string;
+            else if (key === 'patientId') newErrors.patientId = value as string;
             else if (['date', 'time', 'reason'].includes(key)) {
               newErrors[key] = value as string;
+            } else {
+              // Para cualquier otro campo, agregarlo al error general
+              newErrors.general = `${newErrors.general ? newErrors.general + '. ' : ''}${value}`;
             }
           });
           setError(newErrors);
         } else {
           setError({ general: 'Error al crear la cita' });
+        }
+        
+        // Si ocurre un error 401 o 403, intentar reconectar
+        if (err.response?.status === 401 || err.response?.status === 403) {
+          handleReconnect('Su sesión ha expirado. Intentando reconectar...', () => {});
         }
       },
     }
@@ -259,8 +340,16 @@ export const AppointmentList: React.FC = () => {
           doctorId: user._id
         }));
       }
+      
+      // Si es doctor, verificar que haya seleccionado un paciente
+      if (!formData.patientId) {
+        newErrors.patientId = 'Debe seleccionar un paciente';
+        setError(newErrors);
+        return false;
+      }
     } else if (!formData.doctorId) {
       newErrors.general = 'Debe seleccionar un médico';
+      setError(newErrors);
       return false;
     }
 
@@ -326,7 +415,7 @@ export const AppointmentList: React.FC = () => {
     setOpenDialog(false);
     setSelectedDate(null);
     setSelectedTime(null);
-    setFormData({ doctorId: '', reason: '' });
+    setFormData({ doctorId: '', reason: '', patientId: '' });
     setEditingAppointment(null);
     setError({});
     setConfirmActionDialog(false);
@@ -352,6 +441,8 @@ export const AppointmentList: React.FC = () => {
       setFormData({
         doctorId,
         reason: appointment.reason || '',
+        patientId: typeof appointment.patient === 'object' && appointment.patient ? appointment.patient._id : 
+                  typeof appointment.patient === 'string' ? appointment.patient : '',
       });
       setOpenDialog(true);
     } catch (error) {
@@ -387,12 +478,17 @@ export const AppointmentList: React.FC = () => {
         selectedTime.format('HH:mm') : 
         null;
 
-      const appointmentData = {
+      const appointmentData: any = {
         doctorId: formData.doctorId,
         reason: formData.reason.trim(),
         date: selectedDate?.format('YYYY-MM-DD'),
         time: formattedTime || undefined,
       };
+      
+      // Si el usuario es doctor y está creando una cita, añadir el paciente seleccionado
+      if (user?.role === 'doctor' && !editingAppointment && formData.patientId) {
+        appointmentData.patientId = formData.patientId;
+      }
 
       // Validación adicional del formato de hora
       if (!formattedTime || !/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/.test(formattedTime)) {
@@ -426,6 +522,8 @@ export const AppointmentList: React.FC = () => {
         return 'error';
       case 'completed':
         return 'default';
+      case 'no-show':
+        return 'error';
       default:
         return 'default';
     }
@@ -488,14 +586,26 @@ export const AppointmentList: React.FC = () => {
             </Typography>
           </Grid>
           <Grid item>
-            <Button
-              variant="contained"
-              startIcon={<Add />}
-              onClick={handleOpenDialog}
-              disabled={loadingAppointments || !user}
-            >
-              Nueva Cita
-            </Button>
+            <Grid container spacing={1}>
+              <Grid item>
+                <Button
+                  variant="outlined"
+                  onClick={() => window.location.href = '/appointments/archived'}
+                >
+                  Ver Archivadas
+                </Button>
+              </Grid>
+              <Grid item>
+                <Button
+                  variant="contained"
+                  startIcon={<Add />}
+                  onClick={handleOpenDialog}
+                  disabled={loadingAppointments || !user}
+                >
+                  Nueva Cita
+                </Button>
+              </Grid>
+            </Grid>
           </Grid>
         </Grid>
 
@@ -582,6 +692,67 @@ export const AppointmentList: React.FC = () => {
                           </IconButton>
                         </>
                       )}
+                      {/* Solo el doctor puede cambiar el estado de pendiente a confirmado o cancelado */}
+                      {user?.role === 'doctor' && appointment.status === 'pending' && (
+                        <Button
+                          size="small"
+                          color="success"
+                          onClick={() => updateAppointment.mutate({
+                            id: appointment._id,
+                            appointment: { status: 'confirmed' }
+                          })}
+                          sx={{ ml: 1 }}
+                        >
+                          Confirmar
+                        </Button>
+                      )}
+                      {/* Solo el doctor puede marcar como completada o no tomada una cita confirmada cuando ha ocurrido */}
+                      {user?.role === 'doctor' && appointment.status === 'confirmed' && 
+                      dayjs(appointment.date).isBefore(dayjs(), 'day') && (
+                        <>
+                          <Button
+                            size="small"
+                            color="primary"
+                            onClick={() => updateAppointment.mutate({
+                              id: appointment._id,
+                              appointment: { status: 'completed' }
+                            })}
+                            sx={{ ml: 1 }}
+                          >
+                            Completada
+                          </Button>
+                          <Button
+                            size="small"
+                            color="error"
+                            onClick={() => updateAppointment.mutate({
+                              id: appointment._id,
+                              appointment: { status: 'no-show' }
+                            })}
+                            sx={{ ml: 1 }}
+                          >
+                            No tomada
+                          </Button>
+                        </>
+                      )}
+                      {/* Solo el doctor puede archivar una cita completada, cancelada o no tomada */}
+                      {user?.role === 'doctor' && 
+                      (appointment.status === 'completed' || 
+                       appointment.status === 'cancelled' || 
+                       appointment.status === 'no-show') && (
+                        <Button
+                          size="small"
+                          color="secondary"
+                          onClick={() => appointmentService.archiveAppointment(appointment._id)
+                            .then(() => queryClient.invalidateQueries('appointments'))
+                            .catch(err => {
+                              console.error('Error al archivar cita:', err);
+                              setError({ general: `Error al archivar cita: ${err.message || 'Error desconocido'}` });
+                            })}
+                          sx={{ ml: 1 }}
+                        >
+                          Archivar
+                        </Button>
+                      )}
                     </TableCell>
                   </TableRow>
                 ))
@@ -633,6 +804,20 @@ export const AppointmentList: React.FC = () => {
                   )}
                 </TextField>
               </Grid>
+              
+              {/* Campo para seleccionar paciente (solo visible para doctores) */}
+              {user?.role === 'doctor' && (
+                <Grid item xs={12}>
+                  <PatientSelect
+                    value={formData.patientId}
+                    onChange={(patientId) => setFormData(prev => ({
+                      ...prev,
+                      patientId
+                    }))}
+                    error={error.patientId}
+                  />
+                </Grid>
+              )}
               <Grid item xs={12} sm={6}>
                 <DatePicker
                   label="Fecha"
@@ -702,7 +887,7 @@ export const AppointmentList: React.FC = () => {
                   rows={3}
                   value={formData.reason}
                   onChange={(e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
-                  setFormData((prev: { doctorId: string; reason: string }) => ({
+                  setFormData((prev) => ({
                     ...prev,
                     reason: e.target.value,
                   }))

@@ -77,11 +77,12 @@ export interface Appointment {
   reason: string;
   status: AppointmentStatus;
   notes?: string;
+  isArchived: boolean;
   createdAt: string;
   updatedAt: string;
 }
 
-export type AppointmentStatus = 'pending' | 'confirmed' | 'cancelled' | 'completed';
+export type AppointmentStatus = 'pending' | 'confirmed' | 'cancelled' | 'completed' | 'archived' | 'no-show';
 
 // Tipos de respuesta de API
 export interface ApiResponse<T> {

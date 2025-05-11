@@ -9,6 +9,7 @@ import { Navbar } from './components/Navbar';
 import { LoginForm } from './components/auth/LoginForm';
 import { RegisterForm } from './components/auth/RegisterForm';
 import { AppointmentList } from './components/appointments/AppointmentList';
+import { ArchivedAppointmentList } from './components/appointments/ArchivedAppointmentList';
 import AvailabilityManager from './components/doctors/AvailabilityManager';
 import { UnauthorizedPage } from './components/errors/UnauthorizedPage';
 import { ErrorBoundary } from './components/errors/ErrorBoundary';
@@ -144,6 +145,39 @@ function App() {
                         element={
                           <ProtectedRoute roles={['doctor']}>
                             <AvailabilityManager />
+                          </ProtectedRoute>
+                        }
+                      />
+                      
+                      {/* Ruta para citas archivadas */}
+                      <Route
+                        path="/appointments/archived"
+                        element={
+                          <ProtectedRoute>
+                            <ErrorBoundary
+                              fallback={
+                                <div style={{ padding: '2rem', textAlign: 'center' }}>
+                                  <h2>Ha ocurrido un error al cargar las citas archivadas</h2>
+                                  <p>No se pudieron cargar correctamente algunos datos.</p>
+                                  <button
+                                    style={{
+                                      padding: '8px 16px',
+                                      backgroundColor: '#1976d2',
+                                      color: 'white',
+                                      border: 'none',
+                                      borderRadius: '4px',
+                                      cursor: 'pointer',
+                                      marginTop: '1rem',
+                                    }}
+                                    onClick={() => window.location.href = '/appointments'}
+                                  >
+                                    Volver a citas activas
+                                  </button>
+                                </div>
+                              }
+                            >
+                              <ArchivedAppointmentList />
+                            </ErrorBoundary>
                           </ProtectedRoute>
                         }
                       />
