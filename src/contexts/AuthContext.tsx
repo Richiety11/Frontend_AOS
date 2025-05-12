@@ -1,8 +1,29 @@
+/**
+ * @file AuthContext.tsx
+ * @description Contexto de autenticación para la aplicación
+ * Implementa la gestión global del estado de autenticación, incluyendo
+ * login, registro, verificación de tokens y cierre de sesión
+ * @author Equipo de Desarrollo
+ * @version 2.1.0
+ */
+
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { AuthResponse, LoginData, RegisterData } from '../types';
 import { authService, userService } from '../services/api';
 import { logger } from '../services/logger';
 
+/**
+ * @interface AuthContextType
+ * @description Define la estructura e interfaces del contexto de autenticación
+ * @property {AuthResponse['user'] | null} user - Usuario autenticado actualmente o null si no hay sesión
+ * @property {boolean} loading - Indica si hay operaciones de autenticación en proceso
+ * @property {string | null} error - Mensaje de error de la última operación o null si no hay errores
+ * @property {Function} login - Función para iniciar sesión con credenciales
+ * @property {Function} register - Función para registrar nuevos usuarios
+ * @property {Function} logout - Función para cerrar sesión
+ * @property {Function} clearError - Función para limpiar mensajes de error
+ * @property {Function} checkAuth - Función para verificar la validez del token actual
+ */
 interface AuthContextType {
   user: AuthResponse['user'] | null;
   loading: boolean;
@@ -11,14 +32,33 @@ interface AuthContextType {
   register: (data: RegisterData) => Promise<void>;
   logout: () => void;
   clearError: () => void;
-  checkAuth: () => Promise<boolean>; // Añadimos la función de verificación
+  checkAuth: () => Promise<boolean>;
 }
 
+/**
+ * @constant AuthContext
+ * @description Contexto de React para gestionar el estado de autenticación a nivel global
+ * Inicialmente undefined, se poblará con los valores del proveedor
+ */
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+/**
+ * @component AuthProvider
+ * @description Proveedor de contexto de autenticación que gestiona:
+ * - Estado de autenticación del usuario
+ * - Operaciones de autenticación (login, registro, logout)
+ * - Verificación automática de sesiones
+ * - Persistencia y validación de tokens
+ * @param {object} props - Props del componente
+ * @param {React.ReactNode} props.children - Componentes hijos que tendrán acceso al contexto
+ * @returns {JSX.Element} Proveedor de contexto de autenticación
+ */
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  // Estado para almacenar la información del usuario autenticado
   const [user, setUser] = useState<AuthResponse['user'] | null>(null);
+  // Estado para indicar si hay operaciones de autenticación en curso
   const [loading, setLoading] = useState(true);
+  // Estado para almacenar mensajes de error de autenticación
   const [error, setError] = useState<string | null>(null);
 
   // Implementar la función checkAuth a nivel de componente para poder exportarla

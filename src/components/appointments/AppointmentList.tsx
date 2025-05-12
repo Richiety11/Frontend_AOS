@@ -1,3 +1,14 @@
+/**
+ * @file AppointmentList.tsx
+ * @description Componente principal para la gestión de citas médicas.
+ * Permite a los usuarios ver, crear, editar y cancelar citas según su rol.
+ * Implementa interfaces diferenciadas para pacientes y médicos.
+ * @author Equipo de Desarrollo
+ * @version 1.2.0
+ */
+
+// filepath: /Users/mac/Documents/Maestría/Cuarto Semestre/Arquitectura orientada a servicios/practicas/Proyecto Final/frontend/src/components/appointments/AppointmentList.tsx
+
 import React, { useState, useEffect } from 'react';
 import {
   Container,
@@ -37,6 +48,12 @@ import PatientSelect from './PatientSelect';
 import ContinueDialog from '../common/ContinueDialog';
 import { logger } from '../../services/logger';
 
+/**
+ * @component AppointmentList
+ * @description Gestiona la visualización y manipulación de citas médicas.
+ * Permite las operaciones CRUD sobre las citas y muestra diferentes vistas según el rol del usuario.
+ * @returns {JSX.Element} Componente de interfaz de gestión de citas
+ */
 export const AppointmentList: React.FC = () => {
   // Extraemos checkAuth en el nivel superior del componente
   const { user, checkAuth } = useAuth();
@@ -65,8 +82,13 @@ export const AppointmentList: React.FC = () => {
   const [showContinueDialog, setShowContinueDialog] = useState(false);
   const [currentAction, setCurrentAction] = useState<() => void>(() => {});
   
-  // Función para manejar la reconexión de usuarios cuando hay error 401 o 404
-  // Esta función es definida fuera de cualquier callback para evitar problemas con los hooks
+  /**
+   * @function handleReconnect
+   * @description Maneja la reconexión de usuarios cuando hay errores de autenticación o acceso.
+   * @param {string} message - Mensaje de error para mostrar al usuario
+   * @param {Function} [onSuccess] - Callback opcional que se ejecuta después de una reconexión exitosa
+   * @returns {Promise<void>}
+   */
   const handleReconnect = async (message: string, onSuccess?: () => void) => {
     setError({ general: message });
     try {
@@ -103,7 +125,11 @@ export const AppointmentList: React.FC = () => {
     }
   };
 
-  // Obtener citas filtradas según el rol del usuario
+  /**
+   * @query appointments
+   * @description Consulta para obtener citas filtradas según el rol del usuario
+   * Implementa diferentes estrategias de reintento y gestión de errores
+   */
   const { data: appointments, isLoading: loadingAppointments, refetch } = useQuery<Appointment[]>(
     ['appointments', user?._id, user?.role],
     async () => {
@@ -176,12 +202,19 @@ export const AppointmentList: React.FC = () => {
     }
   );
 
-  // Obtener médicos
+  /**
+   * @query doctors
+   * @description Consulta para obtener la lista de médicos disponibles
+   */
   const { data: doctors } = useQuery<Doctor[]>('doctors', () =>
     doctorService.getDoctors()
   );
 
-  // Efecto para preseleccionar el doctor si el usuario es médico
+  /**
+   * @effect
+   * @description Efecto para preseleccionar el doctor si el usuario es médico
+   * Mejora la experiencia de usuario al precompletar campos relevantes
+   */
   useEffect(() => {
     if (user && user.role === 'doctor' && user._id && formData.doctorId === '') {
       try {
@@ -196,7 +229,11 @@ export const AppointmentList: React.FC = () => {
     }
   }, [user, openDialog, formData.doctorId]);
 
-  // Efecto para actualizar el médico seleccionado
+  /**
+   * @effect
+   * @description Efecto para actualizar el médico seleccionado
+   * Mantiene la sincronización entre el ID del médico y el objeto completo
+   */
   useEffect(() => {
     if (formData.doctorId && doctors) {
       const doctor = doctors.find(d => d._id === formData.doctorId);
@@ -206,7 +243,11 @@ export const AppointmentList: React.FC = () => {
     }
   }, [formData.doctorId, doctors]);
 
-  // Efecto para calcular horarios disponibles
+  /**
+   * @effect
+   * @description Efecto para calcular horarios disponibles según el médico y la fecha
+   * Implementa las reglas de negocio para disponibilidad de horarios
+   */
   useEffect(() => {
     if (selectedDoctor && selectedDate) {
       const dayOfWeek = selectedDate.format('dddd').toLowerCase();
@@ -249,7 +290,11 @@ export const AppointmentList: React.FC = () => {
     }
   }, [selectedDoctor, selectedDate, appointments]);
 
-  // Mutación para crear cita con mejor manejo de errores
+  /**
+   * @mutation createAppointment
+   * @description Mutación para crear una nueva cita médica
+   * Implementa manejo de errores avanzado y notificación al usuario
+   */
   const createAppointment = useMutation(
     (data: any) => appointmentService.createAppointment(data),
     {
@@ -291,7 +336,11 @@ export const AppointmentList: React.FC = () => {
     }
   );
 
-  // Mutación para actualizar cita con mejor manejo de errores
+  /**
+   * @mutation updateAppointment
+   * @description Mutación para actualizar una cita existente
+   * Maneja errores y actualiza la caché de React Query
+   */
   const updateAppointment = useMutation(
     (data: { id: string, appointment: Partial<Appointment> }) => 
       appointmentService.updateAppointment(data.id, data.appointment),
@@ -312,7 +361,11 @@ export const AppointmentList: React.FC = () => {
     }
   );
 
-  // Mutación para cancelar cita con mejor manejo de errores
+  /**
+   * @mutation cancelAppointment
+   * @description Mutación para cancelar una cita existente
+   * Incluye confirmación del usuario y manejo de errores
+   */
   const cancelAppointment = useMutation(
     (id: string) => appointmentService.cancelAppointment(id),
     {
@@ -328,6 +381,11 @@ export const AppointmentList: React.FC = () => {
     }
   );
 
+  /**
+   * @function validateForm
+   * @description Valida los campos del formulario de cita antes de enviar
+   * @returns {boolean} Indica si el formulario es válido
+   */
   const validateForm = (): boolean => {
     const newErrors: typeof error = {};
     
@@ -397,10 +455,18 @@ export const AppointmentList: React.FC = () => {
     return Object.keys(newErrors).length === 0;
   };
 
+  /**
+   * @function handleOpenDialog
+   * @description Abre el diálogo para crear o editar citas
+   */
   const handleOpenDialog = () => {
     setOpenDialog(true);
   };
 
+  /**
+   * @function handleCloseDialog
+   * @description Cierra el diálogo con o sin confirmación según el estado actual
+   */
   const handleCloseDialog = () => {
     // Solo mostrar confirmación si hay cambios sin guardar
     if (formData.doctorId || formData.reason || selectedDate || selectedTime) {
@@ -411,6 +477,10 @@ export const AppointmentList: React.FC = () => {
     }
   };
 
+  /**
+   * @function closeDialogAndReset
+   * @description Cierra el diálogo y reinicia el estado del formulario
+   */
   const closeDialogAndReset = () => {
     setOpenDialog(false);
     setSelectedDate(null);
@@ -421,6 +491,11 @@ export const AppointmentList: React.FC = () => {
     setConfirmActionDialog(false);
   };
 
+  /**
+   * @function handleEdit
+   * @description Configura el estado para editar una cita existente
+   * @param {Appointment} appointment - La cita a editar
+   */
   const handleEdit = (appointment: Appointment) => {
     try {
       setEditingAppointment(appointment);
@@ -451,11 +526,20 @@ export const AppointmentList: React.FC = () => {
     }
   };
 
+  /**
+   * @function handleCancelClick
+   * @description Prepara la cancelación de una cita y muestra diálogo de confirmación
+   * @param {Appointment} appointment - La cita a cancelar
+   */
   const handleCancelClick = (appointment: Appointment) => {
     setAppointmentToCancel(appointment);
     setConfirmCancelDialog(true);
   };
 
+  /**
+   * @function handleConfirmCancel
+   * @description Ejecuta la cancelación de una cita después de la confirmación
+   */
   const handleConfirmCancel = () => {
     if (appointmentToCancel) {
       cancelAppointment.mutate(appointmentToCancel._id);
@@ -464,6 +548,11 @@ export const AppointmentList: React.FC = () => {
     setAppointmentToCancel(null);
   };
 
+  /**
+   * @function handleSubmit
+   * @description Procesa el envío del formulario de cita (creación o actualización)
+   * @param {React.FormEvent} e - Evento del formulario
+   */
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setError({});
@@ -512,6 +601,12 @@ export const AppointmentList: React.FC = () => {
     }
   };
 
+  /**
+   * @function getStatusChipColor
+   * @description Determina el color del chip según el estado de la cita
+   * @param {string} status - Estado de la cita
+   * @returns {object} Configuración de color para el Chip
+   */
   const getStatusChipColor = (status: Appointment['status']) => {
     switch (status) {
       case 'pending':
@@ -529,6 +624,12 @@ export const AppointmentList: React.FC = () => {
     }
   };
 
+  /**
+   * @function getConfirmationMessage
+   * @description Obtiene el mensaje de confirmación según el tipo de acción
+   * @param {'edit' | 'delete' | 'discard'} type - Tipo de acción
+   * @returns {string} Mensaje de confirmación
+   */
   const getConfirmationMessage = (type: 'edit' | 'delete' | 'discard') => {
     switch (type) {
       case 'edit':
@@ -558,13 +659,20 @@ export const AppointmentList: React.FC = () => {
     }
   };
 
-  // Gestionar acciones con confirmación
+  /**
+   * @function handleActionWithConfirmation
+   * @description Gestiona acciones que requieren confirmación del usuario
+   * @param {Function} action - La acción a ejecutar después de la confirmación
+   */
   const handleActionWithConfirmation = (action: () => void) => {
     setCurrentAction(() => action);
     setShowContinueDialog(true);
   };
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
 
+  /**
+   * @function handleConfirm
+   * @description Ejecuta la acción actual después de la confirmación
+   */
   const handleConfirm = () => {
     currentAction();
     setShowContinueDialog(false);

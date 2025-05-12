@@ -1,3 +1,15 @@
+/* 
+ * @file App.css
+ * @description Estilos principales de la aplicación
+ * Proporciona los estilos globales y específicos para componentes principales
+ * @author Equipo de Desarrollo
+ * @version 1.0.0
+ */
+
+/* 
+ * Contenedor principal de la aplicación
+ * Centra todo el contenido por defecto
+ */
 .App {
   text-align: center;
 }

@@ -1,57 +1,83 @@
-import axios, { AxiosInstance, AxiosRequestConfig, AxiosResponse, AxiosError } from 'axios';
-// Importación mediante rutas relativas
+/**
+ * Servicio de API para gestionar todas las peticiones HTTP al backend
+ * Implementa patrones singleton, interceptores y manejo centralizado de errores
+ */
+import axios, { AxiosInstance, AxiosRequestConfig, AxiosResponse, AxiosError } from 'axios'; // Cliente HTTP
+// Sistema de registro para monitoreo y depuración
 import { logger } from './logger';
-// Importaciones de tipos con rutas relativas
+// Tipos de datos para comunicación con el backend
 import { AuthResponse, Appointment, Doctor, Availability, User } from '../types';
 
+/**
+ * Extensión del módulo axios para añadir metadata personalizada a las solicitudes
+ * Permite registrar tiempos de inicio para medir rendimiento
+ */
 declare module 'axios' {
   export interface InternalAxiosRequestConfig {
     metadata?: {
-      startTime: number;
+      startTime: number; // Timestamp del inicio de la solicitud
     };
   }
 }
 
+/**
+ * Servicio principal de API implementado como Singleton
+ * Gestiona todas las comunicaciones HTTP con el backend de forma centralizada
+ */
 class ApiService {
-  private static instance: ApiService;
-  private api: AxiosInstance;
+  private static instance: ApiService; // Instancia única (patrón Singleton)
+  private api: AxiosInstance; // Cliente HTTP configurado
 
+  /**
+   * Constructor privado para implementar el patrón Singleton
+   * Configura la instancia de Axios con todas las opciones necesarias
+   */
   private constructor() {
-    // Usar la URL de la API configurada en variables de entorno o usar fallback seguro
+    // Obtener URL base desde variables de entorno o usar valor por defecto
     let apiBaseUrl = process.env.REACT_APP_API_URL || 'http://localhost:3000/api';
     
-    // Asegurarse de que la URL base termine con /
+    // Normalizar formato de URL base para evitar problemas de doble barra
     if (!apiBaseUrl.endsWith('/')) {
       apiBaseUrl = `${apiBaseUrl}/`;
     }
     
     logger.info('Inicializando ApiService con baseURL', { baseURL: apiBaseUrl });
     
+    /**
+     * Configuración avanzada de la instancia de Axios
+     * - Incluye opciones para mejorar rendimiento, seguridad y robustez
+     * - Personaliza manejo de errores y timeouts
+     */
     this.api = axios.create({
-      // Usar URL completa en lugar de relativa para evitar problemas de proxy
-      baseURL: apiBaseUrl,
-      timeout: 15000, // Aumentar el timeout a 15 segundos
+      // Configuración básica
+      baseURL: apiBaseUrl, // URL base completa para evitar problemas con proxies
+      timeout: 15000, // Tiempo de espera ampliado (15s) para redes lentas o operaciones complejas
+      
+      // Cabeceras predeterminadas para todas las solicitudes
       headers: {
-        'Content-Type': 'application/json',
-        'Accept': 'application/json' // Especificar que esperamos JSON de vuelta
+        'Content-Type': 'application/json', // Formato de envío de datos
+        'Accept': 'application/json' // Formato esperado de respuesta
       },
-      // Evitar que Axios agregue encabezados innecesarios
-      withCredentials: false,
-      // Limitar tamaño máximo de respuesta para evitar problemas
-      maxContentLength: 5000000, // 5MB
-      maxBodyLength: 5000000, // 5MB
-      // Configuraciones adicionales para mayor estabilidad
-      validateStatus: status => status < 500, // Solo rechazar promesas en errores 500+
-      // Configurar transformadores de request para eliminar encabezados problemáticos
+      
+      // Configuraciones de seguridad y rendimiento
+      withCredentials: false, // No enviar cookies entre dominios (evita problemas CORS)
+      maxContentLength: 5000000, // Límite de tamaño de respuesta (5MB)
+      maxBodyLength: 5000000, // Límite de tamaño de envío (5MB)
+      
+      // Control personalizado de manejo de errores
+      validateStatus: status => status < 500, // Tratar solo errores 500+ como errores de red
+      
+      // Transformadores personalizados para peticiones
       transformRequest: [
         (data, headers) => {
-          // Eliminar encabezados que pueden causar problemas (como Accept-Encoding)
-          // ya que estos son manejados automáticamente por el navegador
+          // Eliminar cabeceras problemáticas que causan errores CORS
           if (headers) {
+            // Accept-Encoding debe ser manejado por el navegador, no manualmente
             delete headers['Accept-Encoding'];
           }
-          return data;
+          return data; // Devolver datos sin modificar
         }, 
+        // Mantener los transformadores predeterminados de Axios
         ...axios.defaults.transformRequest as any
       ]
     });
@@ -59,6 +85,11 @@ class ApiService {
     this.setupInterceptors();
   }
 
+  /**
+   * Método estático para acceder a la instancia única de ApiService (patrón Singleton)
+   * Crea la instancia si no existe, o devuelve la existente
+   * @returns La instancia única de ApiService
+   */
   public static getInstance(): ApiService {
     if (!ApiService.instance) {
       ApiService.instance = new ApiService();
@@ -66,37 +97,48 @@ class ApiService {
     return ApiService.instance;
   }
 
+  /**
+   * Configura interceptores para peticiones y respuestas HTTP
+   * - Gestiona autenticación automática
+   * - Registra tiempos de peticiones
+   * - Maneja errores comunes de forma centralizada
+   */
   private setupInterceptors(): void {
-    // Interceptor de solicitud
+    // Interceptor para todas las peticiones salientes
     this.api.interceptors.request.use(
       (config) => {
-        // No añadir token para rutas de autenticación específicas (login/register)
+        // Determinar si es una ruta de autenticación que no requiere token
         const isLoginRoute = config.url?.includes('/login');
         const isRegisterRoute = config.url?.includes('/register');
         const isAuthRoute = isLoginRoute || isRegisterRoute;
+        
+        // Obtener token de autenticación almacenado
         const token = localStorage.getItem('token');
         
+        // Registrar estado de autenticación para debugging
         logger.info('Estado de autenticación', {
           tokenExists: !!token,
           url: config.url
         });
         
-        // Asegurarse de que config.headers exista
+        // Garantizar que el objeto headers existe
         config.headers = config.headers || {};
         
-        // Eliminar encabezados que pueden causar problemas CORS
-        delete config.headers['Accept-Encoding'];
-        delete config.headers['X-XSRF-TOKEN'];
+        // Eliminar cabeceras que causan problemas CORS
+        delete config.headers['Accept-Encoding']; // Manejado por el navegador
+        delete config.headers['X-XSRF-TOKEN']; // No utilizado en este backend
         
-        // Agregar el token de autorización para todas las rutas excepto login/register
+        // Gestión de token de autorización
         if (token && !isAuthRoute) {
+          // Añadir token Bearer para rutas protegidas
           config.headers.Authorization = `Bearer ${token}`;
           
-          // Verificar formato del token de forma simplificada
+          // Validación básica de formato de token JWT (debe tener al menos 2 puntos)
           if (!token.includes('.')) {
             logger.warn('Formato de token inválido');
           }
         } else if (!isAuthRoute) {
+          // Advertir si se intenta acceder a ruta protegida sin token
           logger.warn('No se encontró token para la solicitud', { 
             url: config.url 
           });

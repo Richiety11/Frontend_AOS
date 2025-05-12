@@ -1,3 +1,12 @@
+/**
+ * @file Navbar.tsx
+ * @description Barra de navegación principal de la aplicación
+ * Implementa una interfaz adaptativa que muestra diferentes opciones según
+ * el rol del usuario, el estado de autenticación y el tamaño de pantalla
+ * @author Equipo de Desarrollo
+ * @version 1.5.0
+ */
+
 import React, { useState } from 'react';
 import {
   AppBar,
@@ -28,33 +37,64 @@ import {
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 
+/**
+ * @component Navbar
+ * @description Barra de navegación responsiva que adapta su presentación según
+ * el tipo de dispositivo y rol del usuario. Incluye menú lateral para móviles
+ * y menú desplegable para escritorio.
+ * @returns {JSX.Element} Componente de navegación principal
+ */
 export const Navbar: React.FC = () => {
+  // Hooks para acceder al contexto de autenticación y navegación
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
 
+  // Estados para control de menús
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
   const [mobileOpen, setMobileOpen] = useState(false);
 
+  /**
+   * @function handleMenu
+   * @description Gestiona la apertura del menú desplegable
+   * @param {React.MouseEvent<HTMLElement>} event - Evento de click que desencadena la acción
+   */
   const handleMenu = (event: React.MouseEvent<HTMLElement>) => {
     setAnchorEl(event.currentTarget);
   };
 
+  /**
+   * @function handleClose
+   * @description Cierra el menú desplegable
+   */
   const handleClose = () => {
     setAnchorEl(null);
   };
 
+  /**
+   * @function handleDrawerToggle
+   * @description Alterna la visibilidad del menú lateral en dispositivos móviles
+   */
   const handleDrawerToggle = () => {
     setMobileOpen(!mobileOpen);
   };
 
+  /**
+   * @function handleLogout
+   * @description Cierra la sesión del usuario y redirecciona a la página de login
+   */
   const handleLogout = () => {
     logout();
     navigate('/login');
     handleClose();
   };
 
+  /**
+   * @constant menuItems
+   * @description Define las opciones de navegación disponibles con sus respectivos iconos,
+   * rutas de destino y roles de usuario que pueden acceder a ellas
+   */
   const menuItems = [
     {
       text: 'Mis Citas',
@@ -70,6 +110,11 @@ export const Navbar: React.FC = () => {
     },
   ];
 
+  /**
+   * @constant filteredMenuItems
+   * @description Filtra las opciones de menú según el rol del usuario actual
+   * Solo muestra las opciones que corresponden al rol del usuario o las que no tienen restricción
+   */
   const filteredMenuItems = menuItems.filter(
     (item) => !item.roles || (user && item.roles.includes(user.role))
   );

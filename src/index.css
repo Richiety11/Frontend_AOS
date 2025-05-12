@@ -1,3 +1,18 @@
+/* 
+ * @file index.css
+ * @description Estilos globales de la aplicación
+ * Define estilos base y variables para mantener consistencia visual
+ * @author Equipo de Desarrollo
+ * @version 1.1.0
+ */
+
+/* 
+ * Elemento body: Estilos globales para toda la aplicación
+ * - Elimina márgenes predeterminados
+ * - Establece una familia de fuentes moderna y legible con fallbacks para diferentes sistemas
+ * - Activa el suavizado de fuentes para mejor legibilidad
+ * - Fondo claro para mejorar contraste y accesibilidad
+ */
 body {
   margin: 0;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
@@ -8,42 +23,79 @@ body {
   background-color: #f5f5f5;
 }
 
+/* 
+ * Elemento code: Estilo para bloques de código
+ * Usa fuentes monoespaciadas para mejor visualización de código
+ */
 code {
   font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
     monospace;
 }
 
+/*
+ * Personalización de componentes Material UI
+ * Los siguientes selectores sobrescriben estilos predeterminados de Material UI
+ */
+
+/* 
+ * Contenedores: Añade espaciado vertical consistente
+ * para mejorar la legibilidad y estructura visual
+ */
 .MuiContainer-root {
   padding-top: 24px;
   padding-bottom: 24px;
 }
 
+/* 
+ * Tarjetas y superficies elevadas: Garantiza fondo blanco
+ * para mejor contraste con el contenido
+ */
 .MuiPaper-root {
   background-color: #ffffff;
 }
 
-/* Estilos para los campos de formulario */
+/* 
+ * Campos de formulario: Añade espaciado inferior para
+ * mejor distribución vertical de elementos
+ */
 .MuiTextField-root {
   margin-bottom: 16px;
 }
 
-/* Estilos para los botones */
+/* 
+ * Botones: Mejora la apariencia de botones primarios
+ * - Elimina texto en mayúsculas para mejor legibilidad
+ * - Aumenta ligeramente el peso de la fuente para énfasis
+ */
 .MuiButton-contained {
   text-transform: none;
   font-weight: 500;
 }
 
-/* Estilos para las tablas */
+/* 
+ * Tablas: Estilización de componentes de tabla para mejor visualización de datos
+ * - Añade espacio superior para separar del contenido anterior
+ */
 .MuiTableContainer-root {
   margin-top: 16px;
 }
 
+/* 
+ * Encabezados de tabla: Destacados visualmente
+ * - Mayor peso de fuente para mejor jerarquía visual
+ * - Fondo ligeramente diferenciado para distinguir de las filas de datos
+ * - Color de texto oscuro para máxima legibilidad
+ */
 .MuiTableHead-root .MuiTableCell-root {
   font-weight: 600;
   background-color: #f5f5f5;
   color: rgba(0, 0, 0, 0.87);
 }
 
+/* 
+ * Celdas de tabla: Optimizadas para lectura de datos
+ * - Color de texto oscuro para garantizar legibilidad
+ */
 .MuiTableBody-root .MuiTableCell-root {
   color: rgba(0, 0, 0, 0.87);
 }

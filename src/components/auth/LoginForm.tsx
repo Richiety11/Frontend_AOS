@@ -1,3 +1,12 @@
+/**
+ * @file LoginForm.tsx
+ * @description Implementación del formulario de inicio de sesión
+ * Permite a los usuarios autenticarse en el sistema usando sus credenciales
+ * registradas. Incluye validaciones, gestión de errores y redirecciones.
+ * @author Equipo de Desarrollo
+ * @version 1.3.0
+ */
+
 import React, { useState } from 'react';
 import {
   Box,
@@ -10,16 +19,35 @@ import {
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 
+/**
+ * @component LoginForm
+ * @description Componente de formulario para inicio de sesión de usuarios
+ * Implementa validaciones, gestión de estado y comunicación con API de autenticación
+ * @returns {JSX.Element} Formulario de inicio de sesión renderizado
+ */
 export const LoginForm: React.FC = () => {
   const navigate = useNavigate();
   const { login } = useAuth();
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  
+  /**
+   * @state formData
+   * @description Estado local para los datos del formulario
+   * @property {string} email - Correo electrónico del usuario
+   * @property {string} password - Contraseña del usuario (nunca almacenada permanentemente)
+   */
   const [formData, setFormData] = useState({
     email: '',
     password: '',
   });
 
+  /**
+   * @function handleChange
+   * @description Gestiona los cambios en los campos del formulario
+   * Actualiza el estado local con los nuevos valores ingresados
+   * @param {React.ChangeEvent<HTMLInputElement>} e - Evento de cambio del input
+   */
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
     setFormData((prev) => ({
@@ -28,6 +56,12 @@ export const LoginForm: React.FC = () => {
     }));
   };
 
+  /**
+   * @function handleSubmit
+   * @description Procesa el envío del formulario de inicio de sesión
+   * Valida los datos, envía la solicitud de autenticación y maneja respuestas/errores
+   * @param {React.FormEvent} e - Evento de envío del formulario
+   */
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
