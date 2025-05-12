@@ -1,0 +1,11 @@
+# Archivo de configuración para las variables de entorno del frontend
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: frontend-config
+  namespace: medical-system
+data:
+  REACT_APP_API_URL: "http://backend-service:3001/api"
+  REACT_APP_TOKEN_EXPIRY: "1800"
+  REACT_APP_LOG_LEVEL: "error"
+  REACT_APP_CACHE_TTL: "600"
